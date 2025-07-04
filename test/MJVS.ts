@@ -149,8 +149,10 @@ describe("MJVS Tests", function () {
     const candidateNumber = Number(await this.voteContract.candidateNumber());
     const voteNumber = Number(await this.voteContract.voteCount());
     const total_scores = [];
+    let trueVoteCount = 0;
 
     for (let i = 0; i < candidateNumber; i++) {
+      trueVoteCount = 0;
       const result = await this.voteContract.result(i);
       const [Excellent, VGood, Good, Medium, Bad, VBad, Awful] = result;
       const candidateGrades = [
@@ -165,7 +167,6 @@ describe("MJVS Tests", function () {
       total_scores.push(candidateGrades);
       log_str = `Results for candidate ${i + 1} : \n\t\tExcellent :${Excellent}\n\t\tVGood :${VGood}\n\t\tGood : ${Good}\n\t\tMedium: ${Medium}\n\t\tBad : ${Bad}\n\t\tVBad : ${VBad}\n\t\tAwful : ${Awful}`;
       log(log_str, "display decrypted scores");
-      let trueVoteCount = 0;
       for (let i = 0; i < candidateGrades.length; i++) {
         trueVoteCount += candidateGrades[i];
       }
@@ -176,7 +177,9 @@ describe("MJVS Tests", function () {
     log_str = `Total number of votes (including illicit votes) : ${voteNumber}`;
     log(log_str, "display decrypted scores");
 
-    await generateChart(total_scores, voteNumber);
+    //Here we use true vote count to have a matching scale on the chart.
+    //If we were using voteNumber, we would be representing 30 votes in a scale where 100% would represent 32 votes.
+    await generateChart(total_scores, trueVoteCount);
   });
 });
 
