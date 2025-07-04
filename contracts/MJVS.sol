@@ -62,20 +62,55 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
         votingOpen = _state;
     }
 
+    /**
+     *
+     * @param userVote_ the euint8 representing user grade for a given candidate
+     */
+    function fraudCheck(euint8 userVote_) internal returns (euint8) {
+        //if user vote is 0, then it doesn't affect the candidate grade.
+        //The user vote can be illegal, ie having multiple 1s => 00110000 (48 -> will count as 1 good and 1 medium).
+        //We have to make sure the binary representation of the user vote contains only one "1".
+        //If the vote is illegal, we return 0.
+        //To detect fraud, we check that user vote is a power of 2 (only one "1" in the binary representation)
+        //To do so we simply do n & (n - 1) where n is user vote
+        //If the result is 0, the vote is licit, else it is not.
+        /*
+            n (binary)          n-1         n & (n - 1)
+            00000001            00000000    00000000        licit
+            00000010            00000001    00000000        licit
+            00000011            00000010    00000010        illicit
+            ...                 ...         ...             ...
+            10000000            01111111    00000000        licit
+            11111111            11111110    11111110        illicit
+        */
+
+        //Underflow warning, FHE.sub is not currently underflow proof, fhevm 0.7
+        ebool underflowRisk = FHE.lt(userVote_, 1);
+        euint8 userVoteSafeSub = FHE.select(underflowRisk, FHE.asEuint8(0), FHE.sub(userVote_, 1));
+
+        //Check if userVote is a power of 2. If vote is valid (power of 2), then fraudFlag will be 0.
+        ebool fraudFlag = FHE.asEbool(FHE.and(userVote_, userVoteSafeSub));
+        euint8 safeVote = FHE.select(fraudFlag, FHE.asEuint8(0), userVote_);
+        return safeVote;
+    }
+
     function processVote(uint256 candidateId, euint8 userVote_) internal {
+        euint8 licitVote = fraudCheck(userVote_);
         euint32[7] memory gradeArray;
         for (uint256 i = 0; i < 7; i++) {
-            euint32 value = FHE.asEuint32(FHE.and(userVote_, 1));
+            euint32 value = FHE.asEuint32(FHE.and(licitVote, 1));
             gradeArray[i] = value;
-            userVote_ = FHE.shr(userVote_, 1);
+            licitVote = FHE.shr(licitVote, 1);
         }
-        candidateScore[candidateId].Awful = FHE.add(candidateScore[candidateId].Awful, gradeArray[0]);
-        candidateScore[candidateId].VBad = FHE.add(candidateScore[candidateId].VBad, gradeArray[1]);
-        candidateScore[candidateId].Bad = FHE.add(candidateScore[candidateId].Bad, gradeArray[2]);
+
+        //sum gradeArray > 1 fraud -> invalid vote
+        candidateScore[candidateId].Awful = FHE.add(candidateScore[candidateId].Awful, gradeArray[6]);
+        candidateScore[candidateId].VBad = FHE.add(candidateScore[candidateId].VBad, gradeArray[5]);
+        candidateScore[candidateId].Bad = FHE.add(candidateScore[candidateId].Bad, gradeArray[4]);
         candidateScore[candidateId].Medium = FHE.add(candidateScore[candidateId].Medium, gradeArray[3]);
-        candidateScore[candidateId].Good = FHE.add(candidateScore[candidateId].Good, gradeArray[4]);
-        candidateScore[candidateId].VGood = FHE.add(candidateScore[candidateId].VGood, gradeArray[5]);
-        candidateScore[candidateId].Excellent = FHE.add(candidateScore[candidateId].Excellent, gradeArray[6]);
+        candidateScore[candidateId].Good = FHE.add(candidateScore[candidateId].Good, gradeArray[2]);
+        candidateScore[candidateId].VGood = FHE.add(candidateScore[candidateId].VGood, gradeArray[1]);
+        candidateScore[candidateId].Excellent = FHE.add(candidateScore[candidateId].Excellent, gradeArray[0]);
 
         FHE.allowThis(candidateScore[candidateId].Awful);
         FHE.allowThis(candidateScore[candidateId].VBad);
