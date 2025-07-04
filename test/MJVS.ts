@@ -49,7 +49,15 @@ describe("MJVS Tests", function () {
      */
 
     const grades = [1, 2, 4, 8, 16, 32, 64];
-    // Maximum random votes without bugs : 30, delay makes no effect
+    const gradeLabels = ["Excellent", "VGood", "Good", "Medium", "Bad", "VBad", "Awful"];
+
+    const voteCounts0: Record<string, number> = {};
+    const voteCounts1: Record<string, number> = {};
+    for (const label of gradeLabels) {
+      voteCounts0[label] = 0;
+      voteCounts1[label] = 0;
+    }
+
     for (let i = 0; i < 30; i++) {
       const randomVote0 = grades[Math.floor(Math.random() * grades.length)];
       const randomVote1 = grades[Math.floor(Math.random() * grades.length)];
@@ -67,6 +75,54 @@ describe("MJVS Tests", function () {
 
       log_str = `Vote ${i + 1} status : ${voteReceipt.status}`;
       log(log_str, "random votes");
+
+      const label0 = gradeLabels[grades.indexOf(randomVote0)];
+      const label1 = gradeLabels[grades.indexOf(randomVote1)];
+
+      voteCounts0[label0]++;
+      voteCounts1[label1]++;
+
+      expect(voteReceipt.status).to.equal(1);
+    }
+
+    console.log("");
+    log_str = "Random vote summary :";
+    log(log_str, "random votes");
+
+    log_str = "Candidate 0 :";
+    log(log_str, "random votes");
+
+    for (const label of gradeLabels) {
+      log_str = `  ${label}: ${voteCounts0[label]}`;
+      log(log_str, "random votes");
+    }
+    console.log("");
+
+    log_str = "Candidate 1 :";
+    log(log_str, "random votes");
+
+    for (const label of gradeLabels) {
+      log_str = `  ${label}: ${voteCounts1[label]}`;
+      log(log_str, "random votes");
+    }
+  });
+
+  it("it should send 2 illicit votes per candidate", async function () {
+    //The user vote can be illegal, ie having multiple 1s => 00110000 (48 -> will count as 1 good and 1 medium).
+    for (let i = 0; i < 2; i++) {
+      const voteInput = await fhevm.createEncryptedInput(this.voteContract.target.toString(), this.signers[0].address);
+      voteInput.add8(48);
+      voteInput.add8(48);
+      const encryptedVote = await voteInput.encrypt();
+
+      const voteTx = await this.voteContract.vote(
+        [encryptedVote.handles[0], encryptedVote.handles[1]],
+        encryptedVote.inputProof,
+      );
+      const voteReceipt = await voteTx.wait();
+
+      log_str = `Illicit Vote ${i + 1} status : ${voteReceipt.status}`;
+      log(log_str, "illicit votes");
 
       expect(voteReceipt.status).to.equal(1);
     }
@@ -97,7 +153,7 @@ describe("MJVS Tests", function () {
     for (let i = 0; i < candidateNumber; i++) {
       const result = await this.voteContract.result(i);
       const [Excellent, VGood, Good, Medium, Bad, VBad, Awful] = result;
-      total_scores.push([
+      const candidateGrades = [
         Number(Excellent),
         Number(VGood),
         Number(Good),
@@ -105,10 +161,20 @@ describe("MJVS Tests", function () {
         Number(Bad),
         Number(VBad),
         Number(Awful),
-      ]);
-      log_str = `Results for candidate ${i + 1} : ${Excellent} ${VGood} ${Good} ${Medium} ${Bad} ${VBad} ${Awful}`;
-      log(log_str, "debug decrypt scores");
+      ];
+      total_scores.push(candidateGrades);
+      log_str = `Results for candidate ${i + 1} : \n\t\tExcellent :${Excellent}\n\t\tVGood :${VGood}\n\t\tGood : ${Good}\n\t\tMedium: ${Medium}\n\t\tBad : ${Bad}\n\t\tVBad : ${VBad}\n\t\tAwful : ${Awful}`;
+      log(log_str, "display decrypted scores");
+      let trueVoteCount = 0;
+      for (let i = 0; i < candidateGrades.length; i++) {
+        trueVoteCount += candidateGrades[i];
+      }
+      log_str = `Number of true (licit) votes for this candidate : ${trueVoteCount}`;
+      log(log_str, "display decrypted scores");
+      console.log("");
     }
+    log_str = `Total number of votes (including illicit votes) : ${voteNumber}`;
+    log(log_str, "display decrypted scores");
 
     await generateChart(total_scores, voteNumber);
   });
