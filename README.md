@@ -65,11 +65,88 @@ This repository showcases a proof of concept (POC) of a Confidential Majority Ju
 <br />
 <br />
 
+## 🛡️ Fraud Detection
+
+In the MJVS_POC voting system, it is essential to ensure that each vote for a candidate is **valid** and corresponds to **only one grade**. A fraudulent vote could attempt to cast multiple grades simultaneously by setting more than one bit in the encrypted vote.
+
+### 🌟 Goal
+✔ Ensure that **only one grade is selected per vote**.  
+✔ Automatically reject votes that try to vote for multiple grades at once.  
+
+---
+
+### 🛡️ **How the Fraud Check Works**
+
+Each vote is represented as an 8-bit unsigned encrypted integer (`euint8`). The valid grades correspond to binary numbers with **exactly one `1` bit** (i.e., powers of two):
+
+| Grade     | Binary    | Decimal |
+|-----------|------------|---------|
+| Excellent | `00000001` | 1       |
+| VGood     | `00000010` | 2       |
+| Good      | `00000100` | 4       |
+| Medium    | `00001000` | 8       |
+| Bad       | `00010000` | 16      |
+| VBad      | `00100000` | 32      |
+| Awful     | `01000000` | 64      |
+
+If a vote has multiple `1`s (e.g., `00001100`, meaning Good **and** Medium), it is considered **fraudulent**.
+
+---
+
+### ⚙️ **Algorithm Summary**
+
+The fraud detection uses a bit manipulation :
+- A number `n` is a **power of two** (only one bit set) **if and only if**:
+  
+  ```solidity
+  n & (n - 1) == 0
+  ```
+  
+- This check is applied using encrypted operations with the `FHE` library.
+  ```solidity
+  ebool underflowRisk = FHE.lt(userVote_, 1);
+  euint8 userVoteSafeSub = FHE.select(underflowRisk, FHE.asEuint8(0), FHE.sub(userVote_, 1));
+  ebool fraudFlag = FHE.asEbool(FHE.and(userVote_, userVoteSafeSub));
+  euint8 safeVote = FHE.select(fraudFlag, FHE.asEuint8(0), userVote_);
+  return safeVote;
+  ```
+  
+<br />
+
+### ✅ Example (Valid Vote)
+
+| Vote | Vote - 1 | Vote & (Vote - 1) | Is Valid? |
+|-----|----------|--------------------|------------|
+| 8 (`00001000`) | 7 (`00000111`) | 0 (`00000000`) | ✅ Yes |
+
+### ❌ Example (Invalid Vote)
+
+| Vote | Vote - 1 | Vote & (Vote - 1) | Is Valid? |
+|-----|----------|--------------------|------------|
+| 12 (`00001100`) | 11 (`00001011`) | 8 (`00001000`) | ❌ No |
+
+<br />
+
+Inside the contract, this logic is implemented in the `fraudCheck(euint8 userVote_) internal returns (euint8)` function, using the encrypted equivalents of bitwise operations and comparisons.
+
+If the vote is invalid:
+- The fraud check returns **0**, meaning **no grade is incremented** for the candidate.
+- This prevents fraudulent votes from affecting the results.
+
+<br />
+
+Fraud detection summary :
+- ✅ Accepts only encrypted powers of two (`1`, `2`, `4`, `8`, `16`, `32`, `64`).
+- ❌ Rejects any value with multiple bits set.
+
+<br />
+
 ## 🔑 Key Features
 
 - **Confidential Voting:** Votes are encrypted end-to-end using FHE. Votes remain confidential even on-chain.
 - **Majority Judgement Mechanism:** Each candidate's score is evaluated on a 7-grade scale (from Awful to Excellent).
 - **Secure Decryption:** Encrypted tallies are decrypted securely using Zama’s Gateway service, and results are transparently published.
+- **Fraud check:** Ensures all votes are licit.
 - **On-chain Vote Aggregation:** All vote processing, tallying, and storage happens on-chain using encrypted data types (`euint32`, `euint8`).
 - **Built with Solidity 0.8.24** and **Zama's FHEVM libraries**.
 
