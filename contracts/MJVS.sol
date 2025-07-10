@@ -37,6 +37,7 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
 
     mapping(uint256 candidateId => clearNotation score) public result;
     mapping(uint256 candidateId => Notation score) public candidateScore;
+    mapping(address userAddress => bool hasVoted) public voterStatus;
 
     mapping(uint256 requestId => uint256 candidateId) private additionalDecryptionParams;
 
@@ -51,6 +52,14 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
      */
     modifier ensureVotingOpen() {
         require(votingOpen, "Voting is currently closed.");
+        _;
+    }
+
+    /**
+     * @dev Modifier to ensure that the voter has not vited yet.
+     */
+    modifier ensureHasNotVoted(address voterAddr) {
+        require(!voterStatus[voterAddr], "This address have already voted.");
         _;
     }
 
@@ -121,13 +130,17 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
         FHE.allowThis(candidateScore[candidateId].Excellent);
     }
 
-    function vote(externalEuint8[] calldata encryptedUserVote, bytes calldata inputProof) public ensureVotingOpen {
+    function vote(
+        externalEuint8[] calldata encryptedUserVote,
+        bytes calldata inputProof
+    ) public ensureVotingOpen ensureHasNotVoted(msg.sender) {
         for (uint256 i = 0; i < candidateNumber; i++) {
             euint8 userVote = FHE.fromExternal(encryptedUserVote[i], inputProof);
             processVote(i, userVote);
         }
 
         voteCount++;
+        voterStatus[msg.sender] = true;
     }
 
     function requestResult(uint256 candidateId) public onlyOwner {
