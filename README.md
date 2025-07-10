@@ -246,7 +246,7 @@ The test suite uses **Hardhat**, **Chai**, and helper scripts for interaction wi
 
 - ✅ Deployment of the voting contract
 - ✅ Opening the voting session
-- ✅ Submitting **30 random encrypted votes**
+- ✅ Submitting **15 random encrypted votes**
 - ✅ Requesting decryption of vote results
 - ✅ Displaying the final decrypted scores
 - ✅ Generating a score chart (off-chain)
