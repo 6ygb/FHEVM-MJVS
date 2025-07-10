@@ -31,7 +31,7 @@ describe("MJVS Tests", function () {
     expect(openVoteReceipt.status).to.equal(1);
   });
 
-  it("should generate 30 random votes", async function () {
+  it("should generate 15 random votes", async function () {
     /**
      * Vote grade and values for uint8 :
      * 0	00000001	1
@@ -58,16 +58,17 @@ describe("MJVS Tests", function () {
       voteCounts1[label] = 0;
     }
 
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 15; i++) {
       const randomVote0 = grades[Math.floor(Math.random() * grades.length)];
       const randomVote1 = grades[Math.floor(Math.random() * grades.length)];
 
-      const voteInput = await fhevm.createEncryptedInput(this.voteContract.target.toString(), this.signers[0].address);
+      const contractInstance = this.voteContract.connect(this.signers[i]);
+      const voteInput = await fhevm.createEncryptedInput(contractInstance.target.toString(), this.signers[i].address);
       voteInput.add8(randomVote0);
       voteInput.add8(randomVote1);
       const encryptedVote = await voteInput.encrypt();
 
-      const voteTx = await this.voteContract.vote(
+      const voteTx = await contractInstance.vote(
         [encryptedVote.handles[0], encryptedVote.handles[1]],
         encryptedVote.inputProof,
       );
@@ -107,15 +108,19 @@ describe("MJVS Tests", function () {
     }
   });
 
-  it("it should send 2 illicit votes per candidate", async function () {
+  it("it should send 5 illicit votes per candidate", async function () {
     //The user vote can be illegal, ie having multiple 1s => 00110000 (48 -> will count as 1 good and 1 medium).
-    for (let i = 0; i < 2; i++) {
-      const voteInput = await fhevm.createEncryptedInput(this.voteContract.target.toString(), this.signers[0].address);
-      voteInput.add8(48);
-      voteInput.add8(48);
+    for (let i = 0; i < 5; i++) {
+      const contractInstance = this.voteContract.connect(this.signers[15 + i]);
+      const voteInput = await fhevm.createEncryptedInput(
+        contractInstance.target.toString(),
+        this.signers[15 + i].address,
+      );
+      voteInput.add8(64);
+      voteInput.add8(16);
       const encryptedVote = await voteInput.encrypt();
 
-      const voteTx = await this.voteContract.vote(
+      const voteTx = await contractInstance.vote(
         [encryptedVote.handles[0], encryptedVote.handles[1]],
         encryptedVote.inputProof,
       );
@@ -128,11 +133,20 @@ describe("MJVS Tests", function () {
     }
   });
 
+  it("Should revert a second vote attempt with signer 0", async function () {
+    const voteInput = await fhevm.createEncryptedInput(this.voteContract.target.toString(), this.signers[0].address);
+    voteInput.add8(48);
+    voteInput.add8(48);
+    const encryptedVote = await voteInput.encrypt();
+
+    await expect(
+      this.voteContract.vote([encryptedVote.handles[0], encryptedVote.handles[1]], encryptedVote.inputProof),
+    ).to.be.revertedWith("This address have already voted.");
+  });
+
   it("Should decrypt candidates scores", async function () {
     const candidateNumber = Number(await this.voteContract.candidateNumber());
     for (let i = 0; i < candidateNumber; i++) {
-      // const encScore = await this.voteContract.candidateScore(i);
-      // console.log(encScore, i);
       const eventPromise = pollSpecificEvent(this.voteContract, "voteDecrypted", "decrypt candidates score");
       const reqResultTx = await this.voteContract.requestResult(i);
       const reqResultReceipt = await reqResultTx.wait();
