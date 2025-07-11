@@ -11,7 +11,7 @@ describe("MJVS Tests", function () {
 
   it("Should deploy the Voting contract", async function () {
     const MJVSFactory = await ethers.getContractFactory("MJVS_POC", this.signers[0]);
-    const voteContract = await MJVSFactory.deploy(2);
+    const voteContract = await MJVSFactory.deploy();
     await voteContract.waitForDeployment();
     this.voteContract = voteContract;
     log_str = "Vote contract address : " + voteContract.target.toString();
@@ -21,8 +21,26 @@ describe("MJVS Tests", function () {
     expect(await voteContract.getAddress()).to.be.properAddress;
   });
 
+  it("Should create a new election.", async function () {
+    const eventPromise = pollSpecificEvent(this.voteContract, "newElection", "create new election");
+    const createElectionTx = await this.voteContract.createElection(2, "My first elction");
+    const createElectionReceipt = await createElectionTx.wait();
+    const eventParams = await eventPromise;
+    const elecetionLabel = eventParams[2];
+    const electionId = eventParams[3];
+
+    log_str = `Create election tx status : ${createElectionReceipt.status}`;
+    log(log_str, "create new election");
+
+    log_str = `Election Id : ${electionId}, Election Label : ${elecetionLabel}`;
+    log(log_str, "create new election");
+
+    this.electionId = electionId;
+    expect(createElectionReceipt.status).to.equal(1);
+  });
+
   it("Should open voting", async function () {
-    const openVoteTx = await this.voteContract.setVotingState(true);
+    const openVoteTx = await this.voteContract.setVotingState(this.electionId, true);
     const openVoteReceipt = await openVoteTx.wait();
 
     log_str = "Open voting tx status : " + parseInt(openVoteReceipt.status).toString();
@@ -69,6 +87,7 @@ describe("MJVS Tests", function () {
       const encryptedVote = await voteInput.encrypt();
 
       const voteTx = await contractInstance.vote(
+        this.electionId,
         [encryptedVote.handles[0], encryptedVote.handles[1]],
         encryptedVote.inputProof,
       );
@@ -116,11 +135,12 @@ describe("MJVS Tests", function () {
         contractInstance.target.toString(),
         this.signers[15 + i].address,
       );
-      voteInput.add8(64);
-      voteInput.add8(16);
+      voteInput.add8(48);
+      voteInput.add8(48);
       const encryptedVote = await voteInput.encrypt();
 
       const voteTx = await contractInstance.vote(
+        this.electionId,
         [encryptedVote.handles[0], encryptedVote.handles[1]],
         encryptedVote.inputProof,
       );
@@ -135,20 +155,24 @@ describe("MJVS Tests", function () {
 
   it("Should revert a second vote attempt with signer 0", async function () {
     const voteInput = await fhevm.createEncryptedInput(this.voteContract.target.toString(), this.signers[0].address);
-    voteInput.add8(48);
-    voteInput.add8(48);
+    voteInput.add8(64);
+    voteInput.add8(16);
     const encryptedVote = await voteInput.encrypt();
 
     await expect(
-      this.voteContract.vote([encryptedVote.handles[0], encryptedVote.handles[1]], encryptedVote.inputProof),
+      this.voteContract.vote(
+        this.electionId,
+        [encryptedVote.handles[0], encryptedVote.handles[1]],
+        encryptedVote.inputProof,
+      ),
     ).to.be.revertedWith("This address have already voted.");
   });
 
   it("Should decrypt candidates scores", async function () {
-    const candidateNumber = Number(await this.voteContract.candidateNumber());
+    const candidateNumber = Number(await this.voteContract.getCandidateNumber(this.electionId));
     for (let i = 0; i < candidateNumber; i++) {
       const eventPromise = pollSpecificEvent(this.voteContract, "voteDecrypted", "decrypt candidates score");
-      const reqResultTx = await this.voteContract.requestResult(i);
+      const reqResultTx = await this.voteContract.requestResult(this.electionId, i);
       const reqResultReceipt = await reqResultTx.wait();
 
       log_str = `Request result candidate ${i + 1} tx status : ${reqResultReceipt.status}`;
@@ -160,14 +184,14 @@ describe("MJVS Tests", function () {
   });
 
   it("Should display the decrypted results", async function () {
-    const candidateNumber = Number(await this.voteContract.candidateNumber());
-    const voteNumber = Number(await this.voteContract.voteCount());
+    const candidateNumber = Number(await this.voteContract.getCandidateNumber(this.electionId));
+    const voteNumber = Number(await this.voteContract.getVoteCount(this.electionId));
     const total_scores = [];
     let trueVoteCount = 0;
 
     for (let i = 0; i < candidateNumber; i++) {
       trueVoteCount = 0;
-      const result = await this.voteContract.result(i);
+      const result = await this.voteContract.getCandidateResult(this.electionId, i);
       const [Excellent, VGood, Good, Medium, Bad, VBad, Awful] = result;
       const candidateGrades = [
         Number(Excellent),
