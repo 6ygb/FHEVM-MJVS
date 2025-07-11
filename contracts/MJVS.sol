@@ -47,16 +47,6 @@ contract MJVS_POC is SepoliaConfig {
     bool public isDecryptionPending;
     uint256 electionNumber;
 
-    //bool public votingOpen;
-    //uint256 public voteCount;
-    //uint256 public candidateNumber;
-
-    // mapping(uint256 candidateId => clearNotation score) public result;
-    // mapping(uint256 candidateId => Notation score) public candidateScore;
-    // mapping(address userAddress => bool hasVoted) public voterStatus;
-
-    //mapping(uint256 requestId => uint256 candidateId) private additionalDecryptionParams;
-
     mapping(uint256 eleciontId => electionStruct) private election;
     mapping(uint256 requestId => additionnalDecryptionParamsStruct) private additionalDecryptionParams;
 
