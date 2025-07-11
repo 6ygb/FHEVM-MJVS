@@ -3,9 +3,8 @@ pragma solidity ^0.8.24;
 
 import "@fhevm/solidity/lib/FHE.sol";
 import {SepoliaConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
-import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-contract MJVS_POC is SepoliaConfig, Ownable2Step {
+contract MJVS_POC is SepoliaConfig {
     // euint32 max : 4,294,967,295
 
     struct clearNotation {
@@ -28,47 +27,94 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
         euint32 Awful;
     }
 
-    uint256 latestRequestId;
-    bool isDecryptionPending;
-
-    bool public votingOpen;
-    uint256 public voteCount;
-    uint256 public candidateNumber;
-
-    mapping(uint256 candidateId => clearNotation score) public result;
-    mapping(uint256 candidateId => Notation score) public candidateScore;
-    mapping(address userAddress => bool hasVoted) public voterStatus;
-
-    mapping(uint256 requestId => uint256 candidateId) private additionalDecryptionParams;
-
-    event voteDecrypted(uint256 blockNumber, uint256 candidateId);
-
-    constructor(uint256 candidateNumber_) Ownable(msg.sender) {
-        candidateNumber = candidateNumber_;
+    struct additionnalDecryptionParamsStruct {
+        uint256 electionId;
+        uint256 candidateId;
     }
+
+    struct electionStruct {
+        string label;
+        bool votingOpen;
+        uint256 voteCount;
+        uint256 candidateNumber;
+        mapping(uint256 candidateId => clearNotation score) result;
+        mapping(uint256 candidateId => Notation score) candidateScore;
+        mapping(address userAddress => bool hasVoted) voterStatus;
+        address electionOwner;
+    }
+
+    uint256 private latestRequestId;
+    bool public isDecryptionPending;
+    uint256 electionNumber;
+
+    //bool public votingOpen;
+    //uint256 public voteCount;
+    //uint256 public candidateNumber;
+
+    // mapping(uint256 candidateId => clearNotation score) public result;
+    // mapping(uint256 candidateId => Notation score) public candidateScore;
+    // mapping(address userAddress => bool hasVoted) public voterStatus;
+
+    //mapping(uint256 requestId => uint256 candidateId) private additionalDecryptionParams;
+
+    mapping(uint256 eleciontId => electionStruct) private election;
+    mapping(uint256 requestId => additionnalDecryptionParamsStruct) private additionalDecryptionParams;
+
+    event voteDecrypted(uint256 blockNumber, uint256 eleciontId, uint256 candidateId);
+    event newElection(uint256 blockNumber, address electionOwner, string electionLabel, uint256 electionId);
 
     /**
      * @dev Modifier to ensure voting is open.
      */
-    modifier ensureVotingOpen() {
-        require(votingOpen, "Voting is currently closed.");
+    modifier ensureVotingOpen(uint256 electionId) {
+        require(election[electionId].votingOpen, "Voting is currently closed.");
         _;
     }
 
     /**
-     * @dev Modifier to ensure that the voter has not vited yet.
+     * @dev Modifier to ensure that the voter has not voted yet.
      */
-    modifier ensureHasNotVoted(address voterAddr) {
-        require(!voterStatus[voterAddr], "This address have already voted.");
+    modifier ensureHasNotVoted(uint256 electionId, address voterAddr) {
+        require(!election[electionId].voterStatus[voterAddr], "This address have already voted.");
         _;
     }
 
     /**
-     * @dev Allows the owner to modify the voting state (open or close).
+     * @dev Modifier to ensure that the msg sender is owner of the current election.
+     */
+    modifier onlyElectionOwner(uint256 electionId, address targetAddr) {
+        require(targetAddr == election[electionId].electionOwner, "You are not the owner of this election.");
+        _;
+    }
+
+    function getVoteCount(uint256 electionId) public view returns (uint256) {
+        return election[electionId].voteCount;
+    }
+
+    function getCandidateNumber(uint256 electionId) public view returns (uint256) {
+        return election[electionId].candidateNumber;
+    }
+
+    function getCandidateResult(uint256 electionId, uint256 candidateId) public view returns (clearNotation memory) {
+        return election[electionId].result[candidateId];
+    }
+
+    function createElection(uint256 candidateNumber, string calldata label_) public {
+        uint256 currentElectionId = electionNumber;
+        election[currentElectionId].electionOwner = msg.sender;
+        election[currentElectionId].candidateNumber = candidateNumber;
+        election[currentElectionId].label = label_;
+        electionNumber++;
+
+        emit newElection(block.number, msg.sender, label_, currentElectionId);
+    }
+
+    /**
+     * @dev Allows the owner to modify the voting state of the election (open or close).
      * @param _state The state to set votingOpen on.
      */
-    function setVotingState(bool _state) public onlyOwner {
-        votingOpen = _state;
+    function setVotingState(uint256 electionId, bool _state) public onlyElectionOwner(electionId, msg.sender) {
+        election[electionId].votingOpen = _state;
     }
 
     /**
@@ -103,7 +149,7 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
         return safeVote;
     }
 
-    function processVote(uint256 candidateId, euint8 userVote_) internal {
+    function processVote(uint256 electionId, uint256 candidateId, euint8 userVote_) internal {
         euint8 licitVote = fraudCheck(userVote_);
         euint32[7] memory gradeArray;
         for (uint256 i = 0; i < 7; i++) {
@@ -113,50 +159,74 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
         }
 
         //sum gradeArray > 1 fraud -> invalid vote
-        candidateScore[candidateId].Awful = FHE.add(candidateScore[candidateId].Awful, gradeArray[6]);
-        candidateScore[candidateId].VBad = FHE.add(candidateScore[candidateId].VBad, gradeArray[5]);
-        candidateScore[candidateId].Bad = FHE.add(candidateScore[candidateId].Bad, gradeArray[4]);
-        candidateScore[candidateId].Medium = FHE.add(candidateScore[candidateId].Medium, gradeArray[3]);
-        candidateScore[candidateId].Good = FHE.add(candidateScore[candidateId].Good, gradeArray[2]);
-        candidateScore[candidateId].VGood = FHE.add(candidateScore[candidateId].VGood, gradeArray[1]);
-        candidateScore[candidateId].Excellent = FHE.add(candidateScore[candidateId].Excellent, gradeArray[0]);
+        election[electionId].candidateScore[candidateId].Awful = FHE.add(
+            election[electionId].candidateScore[candidateId].Awful,
+            gradeArray[6]
+        );
+        election[electionId].candidateScore[candidateId].VBad = FHE.add(
+            election[electionId].candidateScore[candidateId].VBad,
+            gradeArray[5]
+        );
+        election[electionId].candidateScore[candidateId].Bad = FHE.add(
+            election[electionId].candidateScore[candidateId].Bad,
+            gradeArray[4]
+        );
+        election[electionId].candidateScore[candidateId].Medium = FHE.add(
+            election[electionId].candidateScore[candidateId].Medium,
+            gradeArray[3]
+        );
+        election[electionId].candidateScore[candidateId].Good = FHE.add(
+            election[electionId].candidateScore[candidateId].Good,
+            gradeArray[2]
+        );
+        election[electionId].candidateScore[candidateId].VGood = FHE.add(
+            election[electionId].candidateScore[candidateId].VGood,
+            gradeArray[1]
+        );
+        election[electionId].candidateScore[candidateId].Excellent = FHE.add(
+            election[electionId].candidateScore[candidateId].Excellent,
+            gradeArray[0]
+        );
 
-        FHE.allowThis(candidateScore[candidateId].Awful);
-        FHE.allowThis(candidateScore[candidateId].VBad);
-        FHE.allowThis(candidateScore[candidateId].Bad);
-        FHE.allowThis(candidateScore[candidateId].Medium);
-        FHE.allowThis(candidateScore[candidateId].Good);
-        FHE.allowThis(candidateScore[candidateId].VGood);
-        FHE.allowThis(candidateScore[candidateId].Excellent);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].Awful);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].VBad);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].Bad);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].Medium);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].Good);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].VGood);
+        FHE.allowThis(election[electionId].candidateScore[candidateId].Excellent);
     }
 
     function vote(
+        uint256 electionId,
         externalEuint8[] calldata encryptedUserVote,
         bytes calldata inputProof
-    ) public ensureVotingOpen ensureHasNotVoted(msg.sender) {
-        for (uint256 i = 0; i < candidateNumber; i++) {
+    ) public ensureVotingOpen(electionId) ensureHasNotVoted(electionId, msg.sender) {
+        for (uint256 i = 0; i < election[electionId].candidateNumber; i++) {
             euint8 userVote = FHE.fromExternal(encryptedUserVote[i], inputProof);
-            processVote(i, userVote);
+            processVote(electionId, i, userVote);
         }
 
-        voteCount++;
-        voterStatus[msg.sender] = true;
+        election[electionId].voteCount++;
+        election[electionId].voterStatus[msg.sender] = true;
     }
 
-    function requestResult(uint256 candidateId) public onlyOwner {
+    function requestResult(uint256 electionId, uint256 candidateId) public onlyElectionOwner(electionId, msg.sender) {
         bytes32[] memory cts = new bytes32[](7);
-        cts[0] = FHE.toBytes32(candidateScore[candidateId].Awful);
-        cts[1] = FHE.toBytes32(candidateScore[candidateId].VBad);
-        cts[2] = FHE.toBytes32(candidateScore[candidateId].Bad);
-        cts[3] = FHE.toBytes32(candidateScore[candidateId].Medium);
-        cts[4] = FHE.toBytes32(candidateScore[candidateId].Good);
-        cts[5] = FHE.toBytes32(candidateScore[candidateId].VGood);
-        cts[6] = FHE.toBytes32(candidateScore[candidateId].Excellent);
+        cts[0] = FHE.toBytes32(election[electionId].candidateScore[candidateId].Awful);
+        cts[1] = FHE.toBytes32(election[electionId].candidateScore[candidateId].VBad);
+        cts[2] = FHE.toBytes32(election[electionId].candidateScore[candidateId].Bad);
+        cts[3] = FHE.toBytes32(election[electionId].candidateScore[candidateId].Medium);
+        cts[4] = FHE.toBytes32(election[electionId].candidateScore[candidateId].Good);
+        cts[5] = FHE.toBytes32(election[electionId].candidateScore[candidateId].VGood);
+        cts[6] = FHE.toBytes32(election[electionId].candidateScore[candidateId].Excellent);
         uint256 requestID = FHE.requestDecryption(cts, this.resultCallback.selector);
+
+        additionalDecryptionParams[requestID].electionId = electionId;
+        additionalDecryptionParams[requestID].candidateId = candidateId;
+
         latestRequestId = requestID;
         isDecryptionPending = true;
-
-        additionalDecryptionParams[requestID] = candidateId;
     }
 
     function resultCallback(
@@ -173,16 +243,17 @@ contract MJVS_POC is SepoliaConfig, Ownable2Step {
         require(requestID == latestRequestId, "Invalid requestId");
         FHE.checkSignatures(requestID, signatures);
 
-        uint256 candidateId_ = additionalDecryptionParams[requestID];
-        result[candidateId_].Awful = awful_;
-        result[candidateId_].VBad = vbad_;
-        result[candidateId_].Bad = bad_;
-        result[candidateId_].Medium = medium_;
-        result[candidateId_].Good = good_;
-        result[candidateId_].VGood = vgood_;
-        result[candidateId_].Excellent = excellent_;
+        uint256 candidateId_ = additionalDecryptionParams[requestID].candidateId;
+        uint256 electionId_ = additionalDecryptionParams[requestID].electionId;
+        election[electionId_].result[candidateId_].Awful = awful_;
+        election[electionId_].result[candidateId_].VBad = vbad_;
+        election[electionId_].result[candidateId_].Bad = bad_;
+        election[electionId_].result[candidateId_].Medium = medium_;
+        election[electionId_].result[candidateId_].Good = good_;
+        election[electionId_].result[candidateId_].VGood = vgood_;
+        election[electionId_].result[candidateId_].Excellent = excellent_;
 
         isDecryptionPending = false;
-        emit voteDecrypted(block.number, candidateId_);
+        emit voteDecrypted(block.number, electionId_, candidateId_);
     }
 }
