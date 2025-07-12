@@ -65,7 +65,7 @@ contract MJVS_POC is SepoliaConfig {
      * @dev Modifier to ensure that the voter has not voted yet.
      */
     modifier ensureHasNotVoted(uint256 electionId, address voterAddr) {
-        require(!election[electionId].voterStatus[voterAddr], "This address have already voted.");
+        require(!election[electionId].voterStatus[voterAddr], "This address has already voted.");
         _;
     }
 
